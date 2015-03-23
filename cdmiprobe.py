@@ -56,7 +56,7 @@ def server_ok(serverarg, capath, timeout):
         server_conn.shutdown()
         server_conn.close()
 
-    except(SSLError, socket.error, socket.timeout) as e:
+    except(SSLError, socket.error) as e:
         nagios_out('Critical', 'connection error %s - %s' % (serverarg, repr(e)), 2)
 
     return True
@@ -65,37 +65,77 @@ def nagios_out(status, msg, retcode):
     sys.stdout.write(status+": "+msg+"\n")
     sys.exit(retcode)
 
-def get_keystone_token(server, userca, capath, timeout):
+def get_keystone_scoped_token(server, userca, capath, timeout):
     try:
         headers, token = {}, None
         headers.update(HEADER_CDMI_VERSION)
         headers.update({'Accept': '*/*'})
         response = requests.get(server, headers=headers, cert=userca, verify=False)
+        if response.status_code == 400:
+            response = requests.get(server, headers={}, cert=userca, verify=False)
     except requests.exceptions.ConnectionError as e:
         nagios_out('Critical', 'connection error %s - %s' % (server, str(e)), 2)
 
     try:
-        keystone_server = response.headers['www-authenticate'].split('Keystone uri=')[1].strip('\'')
+        keystone_server = re.search("Keystone.*=[\s'\"]*([\w:/\-_\.]*)[\s*\'\"]*", response.headers['www-authenticate']).group(1)
     except(KeyError, IndexError, AttributeError):
         nagios_out('Critical', 'could not fetch keystone server from response', 2)
 
     if server_ok(keystone_server, capath, timeout):
         try:
+            token_suffix = ''
+            if keystone_server.endswith("v2.0"):
+                token_suffix = token_suffix+'/tokens'
+            else:
+                token_suffix = token_suffix+'/v2.0/tokens'
+
             headers, payload, token = {}, {}, None
             headers.update(HEADER_CDMI_VERSION)
             headers.update({'Accept': '*/*'})
-            headers = {'content-type': 'application/json', 'accept': 'application/json'}
-            payload = {'auth': {'voms': True, 'tenantName': 'ops'}}
-            response = requests.post(keystone_server+'/v2.0/tokens/', headers=headers,
-                                    data=json.dumps(payload), cert=userca, verify=False)
-            response.raise_for_status()
-        except (requests.exceptions.ConnectionError, requests.exceptions.HTTPError) as e:
-            nagios_out('Critical', 'connection error %s - %s' % (keystone_server, str(e)), 2)
 
-        try:
+            headers = {'content-type': 'application/json', 'accept': 'application/json'}
+            payload = {'auth': {'voms': True}}
+            response = requests.post(keystone_server+token_suffix, headers=headers,
+                                    data=json.dumps(payload), cert=userca, verify=False)
             token = response.json()['access']['token']['id']
         except(KeyError, IndexError):
-            nagios_out('Critical', 'could not fetch keystone token from response', 2)
+            nagios_out('Critical', 'could not fetch unscoped keystone token from response', 2)
+        except (requests.exceptions.ConnectionError, requests.exceptions.HTTPError) as e:
+            nagios_out('Critical', 'connection error %s - %s' % (keystone_server+token_suffix, str(e)), 2)
+
+        try:
+            tenant_suffix= ''
+            if keystone_server.endswith("v2.0"):
+                tenant_suffix = tenant_suffix+'/tenants'
+            else:
+                tenant_suffix = tenant_suffix+'/v2.0/tenants'
+            headers = {'content-type': 'application/json', 'accept': 'application/json'}
+            headers.update({'x-auth-token': token})
+            response = requests.post(keystone_server+tenant_suffix, headers=headers,
+                                    data=None, cert=userca, verify=False)
+            response.raise_for_status()
+            tenants = response.json()['tenants']
+            tenant = ''
+            for t in tenants:
+                if 'ops' in t['name']:
+                    tenant = t['name']
+        except(KeyError, IndexError):
+            nagios_out('Critical', 'could not fetch allowed tenants from response', 2)
+        except (requests.exceptions.ConnectionError, requests.exceptions.HTTPError) as e:
+            nagios_out('Critical', 'connection error %s - %s' % (keystone_server+tenant_suffix, str(e)), 2)
+
+        try:
+            headers = {'content-type': 'application/json', 'accept': 'application/json'}
+            payload = {'auth': {'voms': True, 'tenantName': tenant}}
+            response = requests.post(keystone_server+token_suffix, headers=headers,
+                                    data=json.dumps(payload), cert=userca, verify=False)
+            response.raise_for_status()
+            token = response.json()['access']['token']['id']
+
+        except(KeyError, IndexError):
+            nagios_out('Critical', 'could not fetch scoped keystone token for %s from response' % tenant, 2)
+        except (requests.exceptions.ConnectionError, requests.exceptions.HTTPError) as e:
+            nagios_out('Critical', 'connection error %s - %s' % (keystone_server+token_suffix, str(e)), 2)
 
         return token
 
@@ -130,7 +170,7 @@ def main():
             nagios_out('Unknown', 'command-line arguments are not correct', 3)
 
     if server_ok(argholder.endpoint, argholder.capath, argholder.timeout):
-        ks_token = get_keystone_token(argholder.endpoint,
+        ks_token = get_keystone_scoped_token(argholder.endpoint,
                                     argholder.cert,
                                     argholder.capath,
                                     argholder.timeout)
