@@ -185,7 +185,7 @@ def main():
             headers.update({'accept': CDMI_CONTAINER,
                             'content-type': CDMI_CONTAINER})
             headers.update({'x-auth-token': ks_token})
-            response = requests.put(argholder.endpoint+CONTAINER+randstr,
+            response = requests.put(argholder.endpoint+CONTAINER+randstr+'/',
                                     headers=headers, cert=argholder.cert, verify=False)
             response.raise_for_status()
 
@@ -279,7 +279,7 @@ def main():
             headers, payload= {}, {}
             headers.update(HEADER_CDMI_VERSION)
             headers.update({'x-auth-token': ks_token})
-            response = requests.delete(argholder.endpoint+CONTAINER+randstr,
+            response = requests.delete(argholder.endpoint+CONTAINER+randstr+'/',
                                     headers=headers, cert=argholder.cert, verify=False)
             response.raise_for_status()
 
