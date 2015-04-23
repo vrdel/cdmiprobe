@@ -82,7 +82,7 @@ def nagios_out(status, msg, retcode):
     sys.stdout.write(status+": "+msg+"\n")
     sys.exit(retcode)
 
-def get_keystone_scoped_token(server, userca, capath, timeout):
+def get_token(server, userca, capath, timeout):
     try:
         headers, token = {}, None
         headers.update(HEADER_CDMI_VERSION)
@@ -95,6 +95,8 @@ def get_keystone_scoped_token(server, userca, capath, timeout):
 
     try:
         keystone_server = re.search("Keystone.*=[\s'\"]*([\w:/\-_\.]*)[\s*\'\"]*", response.headers['www-authenticate']).group(1)
+        if ':5000' not in keystone_server:
+            raise AttributeError
     except(KeyError, IndexError, AttributeError):
         nagios_out('Critical', 'could not fetch keystone server from response', 2)
 
@@ -188,7 +190,7 @@ def main():
             nagios_out('Unknown', 'command-line arguments are not correct', 3)
 
     if server_ok(argholder.endpoint, argholder.capath, argholder.timeout):
-        ks_token = get_keystone_scoped_token(argholder.endpoint,
+        ks_token = get_token(argholder.endpoint,
                                     argholder.cert,
                                     argholder.capath,
                                     argholder.timeout)
