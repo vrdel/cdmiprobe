@@ -84,6 +84,7 @@ def nagios_out(status, msg, retcode):
 
 def get_token(server, userca, capath, timeout):
     try:
+        # initiate unauthorized response (HTTP 401) with keystone URL
         headers, token = {}, None
         headers.update(HEADER_CDMI_VERSION)
         headers.update({'Accept': '*/*'})
@@ -94,6 +95,7 @@ def get_token(server, userca, capath, timeout):
         nagios_out('Critical', 'connection error %s - %s' % (server, str(e)), 2)
 
     try:
+        # extract public keystone URL from response
         keystone_server = re.search("Keystone.*=[\s'\"]*([\w:/\-_\.]*)[\s*\'\"]*", response.headers['www-authenticate']).group(1)
         if ':5000' not in keystone_server:
             raise AttributeError
@@ -102,6 +104,7 @@ def get_token(server, userca, capath, timeout):
 
     if server_ok(keystone_server, capath, timeout):
         try:
+            # fetch unscoped token
             token_suffix = ''
             if keystone_server.endswith("v2.0"):
                 token_suffix = token_suffix+'/tokens'
@@ -124,6 +127,8 @@ def get_token(server, userca, capath, timeout):
             nagios_out('Critical', 'connection error %s - %s' % (keystone_server+token_suffix, str(e)), 2)
 
         try:
+            # use unscoped token to get a list of allowed tenants mapped to
+            # ops VO from VOMS proxy cert
             tenant_suffix= ''
             if keystone_server.endswith("v2.0"):
                 tenant_suffix = tenant_suffix+'/tenants'
@@ -145,6 +150,7 @@ def get_token(server, userca, capath, timeout):
             nagios_out('Critical', 'connection error %s - %s' % (keystone_server+tenant_suffix, str(e)), 2)
 
         try:
+            # get scoped token for allowed tenant
             headers = {'content-type': 'application/json', 'accept': 'application/json'}
             payload = {'auth': {'voms': True, 'tenantName': tenant}}
             response = requests.post(keystone_server+token_suffix, headers=headers,
@@ -190,6 +196,7 @@ def main():
             nagios_out('Unknown', 'command-line arguments are not correct', 3)
 
     if server_ok(argholder.endpoint, argholder.capath, argholder.timeout):
+        # fetch scoped token for ops VO
         ks_token = get_token(argholder.endpoint,
                                     argholder.cert,
                                     argholder.capath,
