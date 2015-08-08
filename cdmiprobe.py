@@ -90,13 +90,11 @@ def get_token(server, userca, capath, timeout):
             headers, token = {}, None
             headers.update(cdmiver)
             headers.update({'Accept': '*/*'})
-            response = requests.get(server, headers=headers, cert=userca, verify=False)
+            response = requests.get(server, headers=headers, cert=userca, verify=False, timeout=timeout)
             if response.status_code == 400:
                 response = requests.get(server, headers={}, cert=userca, verify=False)
         except requests.exceptions.ConnectionError as e:
-            passed = False
-            if v == len(HEADER_CDMI_VERSIONS) - 1:
-                nagios_out('Critical', 'connection error %s - %s' % (server, str(e)), 2)
+            nagios_out('Critical', 'connection error %s - %s' % (server, str(e)), 2)
 
         try:
             # extract public keystone URL from response
@@ -124,7 +122,7 @@ def get_token(server, userca, capath, timeout):
                 headers = {'content-type': 'application/json', 'accept': 'application/json'}
                 payload = {'auth': {'voms': True}}
                 response = requests.post(keystone_server+token_suffix, headers=headers,
-                                        data=json.dumps(payload), cert=userca, verify=False)
+                                        data=json.dumps(payload), cert=userca, verify=False, timeout=timeout)
                 response.raise_for_status()
                 token = response.json()['access']['token']['id']
             except(KeyError, IndexError):
@@ -132,9 +130,7 @@ def get_token(server, userca, capath, timeout):
                 if v == len(HEADER_CDMI_VERSIONS) - 1:
                     nagios_out('Critical', 'could not fetch unscoped keystone token from response', 2)
             except (requests.exceptions.ConnectionError, requests.exceptions.HTTPError) as e:
-                passed = False
-                if v == len(HEADER_CDMI_VERSIONS) - 1:
-                    nagios_out('Critical', 'connection error %s - %s' % (keystone_server+token_suffix, str(e)), 2)
+                nagios_out('Critical', 'connection error %s - %s' % (keystone_server+token_suffix, str(e)), 2)
 
             try:
                 # use unscoped token to get a list of allowed tenants mapped to
@@ -147,7 +143,7 @@ def get_token(server, userca, capath, timeout):
                 headers = {'content-type': 'application/json', 'accept': 'application/json'}
                 headers.update({'x-auth-token': token})
                 response = requests.get(keystone_server+tenant_suffix, headers=headers,
-                                        data=None, cert=userca, verify=False)
+                                        data=None, cert=userca, verify=False, timeout=timeout)
                 response.raise_for_status()
                 tenants = response.json()['tenants']
                 tenant = ''
@@ -159,16 +155,14 @@ def get_token(server, userca, capath, timeout):
                 if v == len(HEADER_CDMI_VERSIONS) - 1:
                     nagios_out('Critical', 'could not fetch allowed tenants from response', 2)
             except (requests.exceptions.ConnectionError, requests.exceptions.HTTPError) as e:
-                passed = False
-                if v == len(HEADER_CDMI_VERSIONS) - 1:
-                    nagios_out('Critical', 'connection error %s - %s' % (keystone_server+tenant_suffix, str(e)), 2)
+                nagios_out('Critical', 'connection error %s - %s' % (keystone_server+tenant_suffix, str(e)), 2)
 
             try:
                 # get scoped token for allowed tenant
                 headers = {'content-type': 'application/json', 'accept': 'application/json'}
                 payload = {'auth': {'voms': True, 'tenantName': tenant}}
                 response = requests.post(keystone_server+token_suffix, headers=headers,
-                                        data=json.dumps(payload), cert=userca, verify=False)
+                                        data=json.dumps(payload), cert=userca, verify=False, timeout=timeout)
                 response.raise_for_status()
                 token = response.json()['access']['token']['id']
 
@@ -177,9 +171,7 @@ def get_token(server, userca, capath, timeout):
                 if v == len(HEADER_CDMI_VERSIONS) - 1:
                     nagios_out('Critical', 'could not fetch scoped keystone token for %s from response' % tenant, 2)
             except (requests.exceptions.ConnectionError, requests.exceptions.HTTPError) as e:
-                passed = False
-                if v == len(HEADER_CDMI_VERSIONS) - 1:
-                    nagios_out('Critical', 'connection error %s - %s' % (keystone_server+token_suffix, str(e)), 2)
+                nagios_out('Critical', 'connection error %s - %s' % (keystone_server+token_suffix, str(e)), 2)
 
         if passed:
             return token
