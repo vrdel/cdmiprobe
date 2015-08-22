@@ -35,6 +35,26 @@ DOBJECT = '/dataobject-probe'
 
 DEFAULT_PORT = 443
 
+def errmsg_from_excp(e):
+    if getattr(e, 'message', False):
+        retstr = ''
+        if isinstance(e.message, list) or isinstance(e.message, tuple) \
+                or isinstance(e.message, dict):
+            for s in e.message:
+                if isinstance(s, str):
+                    retstr += s + ' '
+                if isinstance(s, tuple) or isinstance(s, tuple):
+                    retstr += ' '.join(s)
+            return retstr
+        elif isinstance(e.message, str):
+            return e.message
+        else:
+            for s in e.message:
+                retstr += str(s) + ' '
+            return retstr
+    else:
+        return str(e)
+
 def server_ok(serverarg, capath, timeout):
     server_ctx = Context(TLSv1_METHOD)
     server_ctx.load_verify_locations(None, capath)
@@ -61,20 +81,20 @@ def server_ok(serverarg, capath, timeout):
 
         try:
             def handler(signum, frame):
-                raise socket.error('timeout after %s' % (timeout))
+                raise socket.error([('Timeout', 'after', str(timeout) + 's')])
 
             signal.signal(signal.SIGALRM, handler)
             signal.alarm(timeout)
             server_conn.do_handshake()
             signal.alarm(0)
         except socket.timeout as e:
-            nagios_out('Critical', 'connection error %s - %s' % (serverarg, repr(e)), 2)
+            nagios_out('Critical', 'Connection error %s - %s' % (server + ':' + str(port), errmsg_from_excp(e)), 2)
 
         server_conn.shutdown()
         server_conn.close()
 
     except(SSLError, socket.error) as e:
-        nagios_out('Critical', 'connection error %s - %s' % (serverarg, repr(e)), 2)
+        nagios_out('Critical', 'Connection error %s - %s' % (server + ':' + str(port), errmsg_from_excp(e)), 2)
 
     return True
 
@@ -94,7 +114,7 @@ def get_token(server, userca, capath, timeout):
             if response.status_code == 400:
                 response = requests.get(server, headers={}, cert=userca, verify=False)
         except requests.exceptions.ConnectionError as e:
-            nagios_out('Critical', 'connection error %s - %s' % (server, str(e)), 2)
+            nagios_out('Critical', 'Connection error %s - %s' % (server, errmsg_from_excp(e)), 2)
 
         try:
             # extract public keystone URL from response
@@ -104,7 +124,7 @@ def get_token(server, userca, capath, timeout):
         except(KeyError, IndexError, AttributeError):
             passed = False
             if v == len(HEADER_CDMI_VERSIONS) - 1:
-                nagios_out('Critical', 'could not fetch keystone server from response', 2)
+                nagios_out('Critical', 'Could not fetch keystone server from response: Key not found %s' % errmsg_from_excp(e), 2)
 
         if server_ok(keystone_server, capath, timeout):
             try:
@@ -128,9 +148,9 @@ def get_token(server, userca, capath, timeout):
             except(KeyError, IndexError):
                 passed = False
                 if v == len(HEADER_CDMI_VERSIONS) - 1:
-                    nagios_out('Critical', 'could not fetch unscoped keystone token from response', 2)
+                    nagios_out('Critical', 'Could not fetch unscoped keystone token from response: Key not found %s' % errmsg_from_excp(e), 2)
             except (requests.exceptions.ConnectionError, requests.exceptions.HTTPError) as e:
-                nagios_out('Critical', 'connection error %s - %s' % (keystone_server+token_suffix, str(e)), 2)
+                nagios_out('Critical', 'Connection error %s - %s' % (keystone_server+token_suffix, errmsg_from_excp(e)), 2)
 
             try:
                 # use unscoped token to get a list of allowed tenants mapped to
@@ -153,9 +173,9 @@ def get_token(server, userca, capath, timeout):
             except(KeyError, IndexError):
                 passed = False
                 if v == len(HEADER_CDMI_VERSIONS) - 1:
-                    nagios_out('Critical', 'could not fetch allowed tenants from response', 2)
+                    nagios_out('Critical', 'could not fetch allowed tenants from response: Key not found %s' % errmsg_from_excp(e), 2)
             except (requests.exceptions.ConnectionError, requests.exceptions.HTTPError) as e:
-                nagios_out('Critical', 'connection error %s - %s' % (keystone_server+tenant_suffix, str(e)), 2)
+                nagios_out('Critical', 'connection error %s - %s' % (keystone_server+tenant_suffix, errmsg_from_excp(e)), 2)
 
             try:
                 # get scoped token for allowed tenant
@@ -169,9 +189,9 @@ def get_token(server, userca, capath, timeout):
             except(KeyError, IndexError):
                 passed = False
                 if v == len(HEADER_CDMI_VERSIONS) - 1:
-                    nagios_out('Critical', 'could not fetch scoped keystone token for %s from response' % tenant, 2)
+                    nagios_out('Critical', 'could not fetch scoped keystone token for %s from response: Key not found %s' % (tenant, errmsg_from_excp(e)), 2)
             except (requests.exceptions.ConnectionError, requests.exceptions.HTTPError) as e:
-                nagios_out('Critical', 'connection error %s - %s' % (keystone_server+token_suffix, str(e)), 2)
+                nagios_out('Critical', 'connection error %s - %s' % (keystone_server+token_suffix, errmsg_from_excp(e)), 2)
 
         if passed:
             return token
@@ -233,7 +253,7 @@ def main():
             except requests.exceptions.HTTPError as e:
                 passed = False
                 if v == len(HEADER_CDMI_VERSIONS) - 1:
-                    nagios_out('Critical', 'test - create_container failed %s' % repr(e), 2)
+                    nagios_out('Critical', 'test - create_container failed %s' % errmsg_from_excp(e), 2)
 
             try:
                 # create data object
@@ -253,7 +273,7 @@ def main():
             except requests.exceptions.HTTPError as e:
                 passed = False
                 if v == len(HEADER_CDMI_VERSIONS) - 1:
-                    nagios_out('Critical', 'test - create_dataobject failed %s' % repr(e), 2)
+                    nagios_out('Critical', 'test - create_dataobject failed %s' % errmsg_from_excp(e), 2)
 
             try:
                 # get data object
@@ -271,7 +291,7 @@ def main():
             except requests.exceptions.HTTPError as e:
                 passed = False
                 if v == len(HEADER_CDMI_VERSIONS) - 1:
-                    nagios_out('Critical', 'test - get_dataobject failed %s' % repr(e), 2)
+                    nagios_out('Critical', 'test - get_dataobject failed %s' % errmsg_from_excp(e), 2)
 
             newranddata = ''.join(random.sample('abcdefghij1234567890', 20))
 
@@ -293,7 +313,7 @@ def main():
             except requests.exceptions.HTTPError as e:
                 passed = False
                 if v == len(HEADER_CDMI_VERSIONS) - 1:
-                    nagios_out('Critical', 'test - update_dataobject failed %s' % repr(e), 2)
+                    nagios_out('Critical', 'test - update_dataobject failed %s' % errmsg_from_excp(e), 2)
 
             try:
                 # get data object
@@ -311,7 +331,7 @@ def main():
             except requests.exceptions.HTTPError as e:
                 passed = False
                 if v == len(HEADER_CDMI_VERSIONS) - 1:
-                    nagios_out('Critical', 'test - get_dataobject failed %s' % repr(e), 2)
+                    nagios_out('Critical', 'test - get_dataobject failed %s' % errmsg_from_excp(e), 2)
 
             try:
                 # remove data object
@@ -325,7 +345,7 @@ def main():
             except requests.exceptions.HTTPError as e:
                 passed = False
                 if v == len(HEADER_CDMI_VERSIONS) - 1:
-                    nagios_out('Critical', 'test - delete_dataobject failed %s' % repr(e), 2)
+                    nagios_out('Critical', 'test - delete_dataobject failed %s' % errmsg_from_excp(e), 2)
 
             try:
                 # remove container
@@ -339,7 +359,7 @@ def main():
             except requests.exceptions.HTTPError as e:
                 passed = False
                 if v == len(HEADER_CDMI_VERSIONS) - 1:
-                    nagios_out('Critical', 'test - delete_container failed %s' % repr(e), 2)
+                    nagios_out('Critical', 'test - delete_container failed %s' % errmsg_from_excp(e), 2)
 
             if passed:
                 nagios_out('OK', 'container and dataobject creating, fetching and removing tests were successful', 0)
