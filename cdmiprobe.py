@@ -92,7 +92,10 @@ def server_ok(serverarg, capath, timeout):
         server_conn.close()
 
     except(SSLError, socket.error) as e:
-        nagios_out('Critical', 'Connection error %s - %s' % (server + ':' + str(port), errmsg_from_excp(e)), 2)
+        if 'sslv3 alert handshake failure' in errmsg_from_excp(e):
+            pass
+        else:
+            nagios_out('Critical', 'Connection error %s - %s' % (server + ':' + str(port), errmsg_from_excp(e)), 2)
 
     return True
 
